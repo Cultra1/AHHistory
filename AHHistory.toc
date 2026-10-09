@@ -4,5 +4,6 @@
 ## Author: Joschua
 ## Version: @project-version@
 ## SavedVariables: AHHistoryDB
+## X-Curse-Project-ID: 1734792
 
 AHHistory.lua
