@@ -1,0 +1,8 @@
+## Interface: 120100
+## Title: AH History
+## Notes: Auction House purchase history, purchase counters in tooltips and a "Previously bought" view in the Buy tab
+## Author: Joschua
+## Version: @project-version@
+## SavedVariables: AHHistoryDB
+
+AHHistory.lua
