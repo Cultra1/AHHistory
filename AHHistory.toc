@@ -1,4 +1,4 @@
-## Interface: 120100
+## Interface: 120105, 120100
 ## Title: AH History
 ## Notes: Auction House purchase history, purchase counters in tooltips and a "Previously bought" view in the Buy tab
 ## Author: Joschua
