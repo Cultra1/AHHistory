@@ -1,5 +1,18 @@
 # AH History
 
+## v1.0.2
+
+- Fixed: the History tab overlapped with tabs of other addons such as Auctioneer.
+- Clicking an item in the History tab now opens it directly in the Buy tab's purchase view. Alt-click searches by name as before.
+- If equipment has no listings at the item level you bought, all available versions are shown instead.
+- Fixed: "Back" in the purchase view now returns to the History tab, and the History tab can be clicked while the purchase view is open.
+- The addon now has its own icon and is listed under "Auctions" in the AddOns list.
+- New diagnostic command `/ahhistory tabcheck`
+
+## v1.0.1
+
+- Updated for the current WoW patch.
+
 ## v1.0.0
 
 First public release.

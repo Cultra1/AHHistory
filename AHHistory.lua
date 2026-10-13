@@ -227,6 +227,68 @@ local function SearchInAH(name)
     end
 end
 
+-- Equipment opened in the buy view at a specific item level. If that level has
+-- no listings, we switch to a name search that shows all available versions.
+local pendingBuyView   -- { itemID, level, name, expires }
+local openedFromHistory = false   -- buy view was opened from the History tab
+
+-- Open an item directly in Blizzard's buy view, the same way as clicking a
+-- search result. Returns false if that is not possible, the caller then falls
+-- back to a name search.
+local function OpenBuyView(e, name)
+    local ah = AuctionHouseFrame
+    if not (ah and ah.SelectBrowseResult and C_AuctionHouse.MakeItemKey) then
+        Debug("Buy view not available in this client version, searching by name")
+        return false
+    end
+
+    local itemKey
+    local species = e.link and e.link:match("|Hbattlepet:(%d+)")
+    if species then
+        itemKey = C_AuctionHouse.MakeItemKey(82800, 0, 0, tonumber(species))   -- 82800 = pet cage
+    else
+        -- equipment is listed per item level, so use the level of the bought item
+        local level = 0
+        if e.link and C_Item.IsEquippableItem and C_Item.IsEquippableItem(e.itemID) then
+            level = C_Item.GetDetailedItemLevelInfo(e.link) or 0
+        end
+        itemKey = C_AuctionHouse.MakeItemKey(e.itemID, level)
+    end
+    if not itemKey then return false end
+
+    local level = itemKey.itemLevel or 0
+    pendingBuyView = nil
+    local ok, err = pcall(ah.SelectBrowseResult, ah, { itemKey = itemKey, minPrice = 0, totalQuantity = 0 })
+    if not ok then
+        Debug("Opening the buy view failed, searching by name:", tostring(err))
+    elseif level > 0 and name then
+        pendingBuyView = { itemID = e.itemID, level = level, name = name, expires = GetTime() + 10 }
+    end
+    return ok
+end
+
+-- Called when item search results arrive: if our buy view stayed empty,
+-- show all versions of the item instead
+local function CheckEmptyBuyView(itemKey)
+    local p = pendingBuyView
+    if not p or type(itemKey) ~= "table" then return end
+    if GetTime() > p.expires then
+        pendingBuyView = nil
+        return
+    end
+    if itemKey.itemID ~= p.itemID or (itemKey.itemLevel or 0) ~= p.level then return end
+    local complete = not C_AuctionHouse.HasFullItemSearchResults or C_AuctionHouse.HasFullItemSearchResults(itemKey)
+    if not complete then return end
+
+    pendingBuyView = nil
+    local count = C_AuctionHouse.GetNumItemSearchResults(itemKey) or 0
+    Debug(("Buy view for item level %d: %d listings"):format(p.level, count))
+    if count == 0 then
+        Print(("No listings at item level %d, showing all versions."):format(p.level))
+        SearchInAH(p.name)
+    end
+end
+
 local function FormatStats(count, qty)
     return ("Bought %d time(s), %s total"):format(count or 0, BreakUpLargeNumbers(qty or 0))
 end
@@ -291,7 +353,8 @@ local function Row_OnEnter(self)
             if sc then GameTooltip:AddLine(FormatStats(sc.count, sc.qty), 1, 1, 1) end
         end
     end
-    GameTooltip:AddLine("Click: search in Buy tab", 0.6, 0.6, 0.6)
+    GameTooltip:AddLine("Click: open in Buy tab", 0.6, 0.6, 0.6)
+    GameTooltip:AddLine("Alt-click: search by name", 0.6, 0.6, 0.6)
     GameTooltip:AddLine("Shift-click: link in chat", 0.6, 0.6, 0.6)
     GameTooltip:AddLine("Right-click: remove", 0.6, 0.6, 0.6)
     GameTooltip:Show()
@@ -328,11 +391,19 @@ local function Row_OnClick(self, button)
         ShowRowMenu(self)
         return
     end
-    if IsModifierKeyDown() and self.link then
-        HandleModifiedItemClick(self.link)
+    local name = self.link and self.link:match("%[(.-)%]")
+    if IsAltKeyDown() then
+        if name then SearchInAH(name) end           -- alt-click: search by name
         return
     end
-    local name = self.link and self.link:match("%[(.-)%]")
+    if IsModifierKeyDown() and self.link then
+        HandleModifiedItemClick(self.link)          -- shift: chat link, ctrl: dressing room
+        return
+    end
+    if self.data and OpenBuyView(self.data.e, name) then
+        openedFromHistory = true
+        return
+    end
     if name then SearchInAH(name) end
 end
 
@@ -1385,6 +1456,73 @@ local function HookBuyTab(ah)
     end
 end
 
+---------------------------------------------------------------------------
+-- History tab position
+--   Other addons (e.g. Auctioneer) add their own tabs, sometimes at fixed
+--   positions or later than we do. On every AH open we look for the tab that
+--   is actually furthest to the right and line up behind it.
+---------------------------------------------------------------------------
+
+-- Does frame (directly or through its anchor chain) depend on target?
+-- Anchoring to such a frame would create a loop, so we skip it.
+local function DependsOn(frame, target)
+    local visited = {}
+    local function walk(f)
+        if not f or visited[f] or not f.GetNumPoints then return false end
+        visited[f] = true
+        for i = 1, f:GetNumPoints() do
+            local _, rel = f:GetPoint(i)
+            if rel == target or walk(rel) then return true end
+        end
+        return false
+    end
+    return walk(frame)
+end
+
+-- All visible tab-like buttons in the tab row of the Auction House
+local function FindTabRowButtons()
+    local ah = AuctionHouseFrame
+    local ref = ah.BuyTab or ah.Tabs[1]
+    local refTop = ref and ref:GetTop()
+    local found = {}
+    if not refTop then return found end
+    for _, child in ipairs({ ah:GetChildren() }) do
+        if child ~= ui.tab and child:IsShown() and child:GetObjectType() == "Button" then
+            local top, right = child:GetTop(), child:GetRight()
+            if top and right and math.abs(top - refTop) < 8 then
+                found[#found + 1] = child
+            end
+        end
+    end
+    return found
+end
+
+local function PlaceHistoryTab()
+    if not ui or not ui.tab then return end
+    local ah, tab = AuctionHouseFrame, ui.tab
+
+    local best = ui.defaultTabAnchor
+    local bestRight = best and best:GetRight() or 0
+    for _, button in ipairs(FindTabRowButtons()) do
+        local right = button:GetRight()
+        if right > bestRight and not DependsOn(button, tab) then
+            best, bestRight = button, right
+        end
+    end
+
+    tab:ClearAllPoints()
+    tab:SetPoint("LEFT", best, "RIGHT", ui.tabXOff, 0)
+
+    if debugMode then
+        local name = best and (best:GetName() or best:GetText() or "unnamed") or "none"
+        Debug(("History tab placed after: %s"):format(tostring(name)))
+        local tabRight, ahRight = tab:GetRight(), ah:GetRight()
+        if tabRight and ahRight and tabRight > ahRight then
+            Debug("History tab does not fit into the Auction House frame")
+        end
+    end
+end
+
 local function CreateUI()
     local ah = AuctionHouseFrame
     if not ah or ui then return end
@@ -1549,15 +1687,49 @@ local function CreateUI()
         ah:SetDisplayMode(HISTORY_MODE)
     end)
 
+    ui.tab = tab
+    ui.defaultTabAnchor = lastTab
+    ui.tabXOff = xOff
+    -- one frame later, so other addons have created and placed their tabs
+    ah:HookScript("OnShow", function() C_Timer.After(0, PlaceHistoryTab) end)
+
     -- show/hide our own frame ourselves, independent of Blizzard's logic
     hooksecurefunc(ah, "SetDisplayMode", function(self, mode)
         if mode == HISTORY_MODE then
             f:Show()
             PanelTemplates_SetTab(self, tab:GetID())
-        else
-            f:Hide()
+            return
+        end
+        f:Hide()
+
+        local modes = AuctionHouseFrameDisplayMode or {}
+        if mode ~= modes.ItemBuy and mode ~= modes.CommoditiesBuy then
+            openedFromHistory = false
+        end
+
+        -- Blizzard does not update the tabs for every mode (e.g. the buy view).
+        -- The History tab must not stay selected, a selected tab cannot be clicked.
+        local selected = PanelTemplates_GetSelectedTab and PanelTemplates_GetSelectedTab(self) or self.selectedTab
+        if selected == tab:GetID() then
+            PanelTemplates_SetTab(self, tIndexOf(self.Tabs, self.BuyTab) or 1)
         end
     end)
+
+    -- "Back" in the buy view: return to the History tab if we came from there
+    local backFromHistory = false
+    for _, buyFrame in ipairs({ ah.ItemBuyFrame, ah.CommoditiesBuyFrame }) do
+        local back = buyFrame and buyFrame.BackButton
+        if back then
+            -- PreClick runs before Blizzard switches back to the Buy tab
+            back:HookScript("PreClick", function() backFromHistory = openedFromHistory end)
+            back:HookScript("OnClick", function()
+                if backFromHistory then
+                    backFromHistory = false
+                    ah:SetDisplayMode(HISTORY_MODE)
+                end
+            end)
+        end
+    end
 
     f:SetScript("OnShow", function()
         dd:GenerateMenu()
@@ -1795,6 +1967,7 @@ end
 
 function handlers.ITEM_SEARCH_RESULTS_UPDATED(itemKey)
     if type(itemKey) == "table" then lastItemKey = itemKey end
+    CheckEmptyBuyView(itemKey)
 end
 handlers.ITEM_SEARCH_RESULTS_ADDED = handlers.ITEM_SEARCH_RESULTS_UPDATED
 
@@ -1864,6 +2037,21 @@ SlashCmdList.AHHISTORY = function(msg)
     msg = (msg or ""):lower()
     if msg == "color" then
         OpenColorPicker()
+    elseif msg == "tabcheck" then
+        if not ui or not ui.tab or not AuctionHouseFrame:IsShown() then
+            Print("Open the Auction House first.")
+        else
+            local buttons = FindTabRowButtons()
+            local names = {}
+            for _, b in ipairs(buttons) do
+                names[#names + 1] = ("%s (%.0f)"):format(tostring(b:GetName() or b:GetText() or "unnamed"),
+                    b:GetRight() or 0)
+            end
+            Print(("tab row: %d buttons"):format(#buttons))
+            Print(#names > 0 and table.concat(names, ", ") or "none")
+            Print(("history tab right edge: %.0f, frame right edge: %.0f")
+                :format(ui.tab:GetRight() or 0, AuctionHouseFrame:GetRight() or 0))
+        end
     elseif msg == "catcheck" then
         local cl = AuctionHouseFrame and AuctionHouseFrame.CategoriesList
         Print("list:", tostring(cl ~= nil), "scrollbox:", tostring(prevCatBox ~= nil),

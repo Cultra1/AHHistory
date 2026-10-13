@@ -1,6 +1,18 @@
 ## Interface: 120105, 120100
 ## Title: AH History
 ## Notes: Auction House purchase history, purchase counters in tooltips and a "Previously bought" view in the Buy tab
+## IconTexture: Interface\AddOns\AHHistory\Media\AHHistory_Icon
+## Category: Auctions
+## Category-deDE: Auktionen
+## Category-esES: Subastas
+## Category-esMX: Subastas
+## Category-frFR: Ventes
+## Category-itIT: Aste
+## Category-koKR: 경매
+## Category-ptBR: Leilões
+## Category-ruRU: Аукционы
+## Category-zhCN: 拍卖
+## Category-zhTW: 拍賣
 ## Author: Joschua
 ## Version: @project-version@
 ## SavedVariables: AHHistoryDB
