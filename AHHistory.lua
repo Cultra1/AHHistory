@@ -954,6 +954,15 @@ end
 local DEFAULT_TINT = { r = 1, g = 0.82, b = 0, a = 0.15 }
 local buyTabTintOk = false
 
+-- ForEachFrame errors while the ScrollBox has no view yet
+-- (its first Update runs on Show, before Blizzard assigns the view)
+local function ForEachBoxFrame(box, fn)
+    if not box or not box.ForEachFrame then return false end
+    if box.GetView and not box:GetView() then return false end
+    box:ForEachFrame(fn)
+    return true
+end
+
 -- Find the result for a row (stored differently depending on the client version)
 local function GetBrowseEntry(frame, elementData)
     local brf = AuctionHouseFrame and AuctionHouseFrame.BrowseResultsFrame
@@ -994,7 +1003,7 @@ end
 local function RefreshBuyTabTint()
     local brf = AuctionHouseFrame and AuctionHouseFrame.BrowseResultsFrame
     local box = brf and brf.ItemList and brf.ItemList.ScrollBox
-    if box and box.ForEachFrame then box:ForEachFrame(ApplyRowTint) end
+    ForEachBoxFrame(box, ApplyRowTint)
 end
 
 local function OpenColorPicker()
@@ -1337,8 +1346,8 @@ local catClickHookOk = false
 local favoritesHookOk = false
 
 local function CopyBlizzardCategoryFont()
-    if blizzCatFont or not prevCatBox or not prevCatBox.ForEachFrame then return end
-    prevCatBox:ForEachFrame(function(frame)
+    if blizzCatFont then return end
+    ForEachBoxFrame(prevCatBox, function(frame)
         if blizzCatFont then return end
         local fs = frame.Text or (frame.GetFontString and frame:GetFontString())
         local font = fs and fs.GetFontObject and fs:GetFontObject()
@@ -2070,7 +2079,7 @@ SlashCmdList.AHHISTORY = function(msg)
         if prevCatBox and prevCatBox.ForEachFrame then
             local n, clickable = 0, 0
             local sample
-            prevCatBox:ForEachFrame(function(frame)
+            ForEachBoxFrame(prevCatBox, function(frame)
                 n = n + 1
                 if frame.HasScript and frame:HasScript("OnClick") then clickable = clickable + 1 end
                 if not sample then
@@ -2094,7 +2103,7 @@ SlashCmdList.AHHISTORY = function(msg)
             RefreshBuyTabTint()   -- tint once directly, then count
             local rows, found, known, shown = 0, 0, 0, 0
             local sample, knownFrame
-            box:ForEachFrame(function(frame, elementData)
+            ForEachBoxFrame(box, function(frame, elementData)
                 rows = rows + 1
                 sample = sample or type(elementData)
                 local entry = GetBrowseEntry(frame, elementData)

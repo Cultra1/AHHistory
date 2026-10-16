@@ -1,5 +1,9 @@
 # AH History
 
+## v1.0.3
+
+- Fixed: Lua error in `ScrollBox.lua` when opening the Auction House.
+
 ## v1.0.2
 
 - Fixed: the History tab overlapped with tabs of other addons such as Auctioneer.
